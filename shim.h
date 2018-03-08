@@ -41,6 +41,13 @@ typedef struct _SHIM_LOCK {
 	EFI_SHIM_LOCK_CONTEXT Context;
 } SHIM_LOCK;
 
+typedef EFI_STATUS (EFIAPI *entry_point_t) (EFI_HANDLE image_handle,
+					    EFI_SYSTEM_TABLE *system_table);
+
+extern EFI_STATUS handle_image (void *data, unsigned int datasize,
+				EFI_LOADED_IMAGE *li,
+				EFI_PHYSICAL_ADDRESS *memory, UINTN *pages,
+				entry_point_t *entry_point);
 extern EFI_STATUS shim_init(void);
 extern void shim_fini(void);
 extern EFI_STATUS LogError(const char *file, int line, const char *func, CHAR16 *fmt, ...);

@@ -57,7 +57,6 @@
 
 static EFI_SYSTEM_TABLE *systab;
 static EFI_HANDLE global_image_handle;
-static EFI_STATUS (EFIAPI *entry_point) (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table);
 
 static CHAR16 *second_stage;
 static void *load_options;
@@ -1275,8 +1274,9 @@ static EFI_STATUS read_header(void *data, unsigned int datasize,
 /*
  * Once the image has been loaded it needs to be validated and relocated
  */
-static EFI_STATUS handle_image (void *data, unsigned int datasize,
-				EFI_LOADED_IMAGE *li)
+EFI_STATUS handle_image (void *data, unsigned int datasize,
+			 EFI_LOADED_IMAGE *li, EFI_PHYSICAL_ADDRESS *memory,
+			 UINTN *pages, entry_point_t *entry_point)
 {
 	EFI_STATUS efi_status;
 	char *buffer;
@@ -1285,7 +1285,6 @@ static EFI_STATUS handle_image (void *data, unsigned int datasize,
 	char *base, *end;
 	PE_COFF_LOADER_IMAGE_CONTEXT context;
 	unsigned int alignment, alloc_size;
-	EFI_PHYSICAL_ADDRESS alloc_address;
 	int found_entry_point = 0;
 	UINT8 sha1hash[SHA1_DIGEST_SIZE];
 	UINT8 sha256hash[SHA256_DIGEST_SIZE];
@@ -1348,27 +1347,26 @@ static EFI_STATUS handle_image (void *data, unsigned int datasize,
 
 	alloc_size = ALIGN_VALUE(context.ImageSize + context.SectionAlignment,
 				 PAGE_SIZE);
+	*pages = alloc_size / PAGE_SIZE;
 
 	efi_status = uefi_call_wrapper (BS->AllocatePages, 4,
 					AllocateAnyPages,
 					EfiLoaderCode,
-					alloc_size / PAGE_SIZE,
-					&alloc_address);
+					*pages, memory);
 
 	if (efi_status != EFI_SUCCESS) {
 		perror(L"Failed to allocate image buffer\n");
 		return EFI_OUT_OF_RESOURCES;
 	}
 
-	buffer = (void *)ALIGN_VALUE((unsigned long)alloc_address, alignment);
+	buffer = (void *)ALIGN_VALUE((unsigned long)*memory, alignment);
 
 	CopyMem(buffer, data, context.SizeOfHeaders);
 
-	entry_point = ImageAddress(buffer, context.ImageSize, context.EntryPoint);
-	if (!entry_point) {
+	*entry_point = ImageAddress(buffer, context.ImageSize, context.EntryPoint);
+	if (! *entry_point) {
 		perror(L"Entry point is invalid\n");
-		uefi_call_wrapper(BS->FreePages, 2, alloc_address,
-				  alloc_size / PAGE_SIZE);
+		uefi_call_wrapper(BS->FreePages, 2, *memory, *pages);
 		return EFI_UNSUPPORTED;
 	}
 
@@ -1402,8 +1400,7 @@ static EFI_STATUS handle_image (void *data, unsigned int datasize,
 
 		if (end < base) {
 			perror(L"Section %d has negative size\n", i);
-			uefi_call_wrapper(BS->FreePages, 2,  alloc_address,
-					  alloc_size / PAGE_SIZE);
+			uefi_call_wrapper(BS->FreePages, 2, *memory, *pages);
 			return EFI_UNSUPPORTED;
 		}
 
@@ -1874,6 +1871,9 @@ EFI_STATUS start_image(EFI_HANDLE image_handle, CHAR16 *ImagePath)
 	EFI_GUID loaded_image_protocol = LOADED_IMAGE_PROTOCOL;
 	EFI_STATUS efi_status;
 	EFI_LOADED_IMAGE *li, li_bak;
+	EFI_PHYSICAL_ADDRESS memory;
+	UINTN pages;
+	entry_point_t entry_point = NULL;
 	CHAR16 *PathName = NULL;
 	void *sourcebuffer = NULL;
 	UINT64 sourcesize = 0;
@@ -1950,7 +1950,8 @@ EFI_STATUS start_image(EFI_HANDLE image_handle, CHAR16 *ImagePath)
 	/*
 	 * Verify and, if appropriate, relocate and execute the executable
 	 */
-	efi_status = handle_image(data, datasize, li);
+	efi_status = handle_image(data, datasize, li, &memory, &pages,
+				  &entry_point);
 
 	if (efi_status != EFI_SUCCESS) {
 		perror(L"Failed to load image: %r\n", efi_status);

@@ -52,6 +52,7 @@
 #include <efilib.h>
 #include "shim.h"
 #include "replacements.h"
+#include "transparent.h"
 #include "console.h"
 #include "errors.h"
 
@@ -59,6 +60,7 @@ static EFI_SYSTEM_TABLE *systab;
 
 static typeof(systab->BootServices->LoadImage) system_load_image;
 static typeof(systab->BootServices->StartImage) system_start_image;
+static typeof(systab->BootServices->UnloadImage) system_unload_image;
 static typeof(systab->BootServices->Exit) system_exit;
 static typeof(systab->BootServices->ExitBootServices) system_exit_boot_services;
 
@@ -72,6 +74,7 @@ unhook_system_services(void)
 
 	systab->BootServices->LoadImage = system_load_image;
 	systab->BootServices->StartImage = system_start_image;
+	systab->BootServices->UnloadImage = system_unload_image;
 	systab->BootServices->ExitBootServices = system_exit_boot_services;
 }
 
@@ -87,6 +90,11 @@ load_image(BOOLEAN BootPolicy, EFI_HANDLE ParentImageHandle,
 			ParentImageHandle, DevicePath,
 			SourceBuffer, SourceSize, ImageHandle);
 	hook_system_services(systab);
+	if (status == EFI_SECURITY_VIOLATION) {
+		status = transparent_load_image(systab,
+			ParentImageHandle, DevicePath,
+			SourceBuffer, SourceSize, ImageHandle);
+	}
 	if (EFI_ERROR(status))
 		last_loaded_image = NULL;
 	else
@@ -98,6 +106,17 @@ static EFI_STATUS EFIAPI
 start_image(EFI_HANDLE image_handle, UINTN *exit_data_size, CHAR16 **exit_data)
 {
 	EFI_STATUS status;
+	struct transparent_image *trans;
+
+	trans = transparent_get(image_handle);
+	if (trans) {
+		loader_is_participating = 1;
+		status = transparent_start_image(trans, image_handle,
+						 exit_data_size, exit_data);
+		loader_is_participating = 0;
+		return status;
+	}
+
 	unhook_system_services();
 
 	if (image_handle == last_loaded_image) {
@@ -123,6 +142,18 @@ start_image(EFI_HANDLE image_handle, UINTN *exit_data_size, CHAR16 **exit_data)
 		loader_is_participating = 0;
 	}
 	return status;
+}
+
+static EFI_STATUS EFIAPI
+unload_image(EFI_HANDLE image_handle)
+{
+	struct transparent_image *trans;
+
+	trans = transparent_get(image_handle);
+	if (trans)
+		return transparent_unload_image(trans, image_handle);
+
+	return system_unload_image(image_handle);
 }
 
 static EFI_STATUS EFIAPI
@@ -191,6 +222,10 @@ hook_system_services(EFI_SYSTEM_TABLE *local_systab)
 	 * image trusted by the firmware */
 	system_start_image = systab->BootServices->StartImage;
 	systab->BootServices->StartImage = start_image;
+
+	/* we need UnloadImage() to handle transparent images */
+	system_unload_image = systab->BootServices->UnloadImage;
+	systab->BootServices->UnloadImage = unload_image;
 
 	/* we need to hook ExitBootServices() so a) we can enforce the policy
 	 * and b) we can unwrap when we're done. */
