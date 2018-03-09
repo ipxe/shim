@@ -1,5 +1,5 @@
 /*
- * transparent - UEFI shim transparent LoadImage()/StartImage() support
+ * loader - UEFI shim transparent LoadImage()/StartImage() support
  *
  * Copyright (C) 2018 Michael Brown <mbrown@fensystems.co.uk>
  *
@@ -28,25 +28,43 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED
  * OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#ifndef _TRANSPARENT_H
-#define _TRANSPARENT_H
+#ifndef _LOADER_H
+#define _LOADER_H
 
 #include <efi.h>
 #include <efiapi.h>
 
-struct transparent_image;
+#define LOADER_PROTOCOL_GUID \
+  { \
+    0xC94BE948, 0x45F3, 0x4FD2, \
+    { 0x89, 0x6F, 0x89, 0x65, 0xBE, 0x99, 0x53, 0x45 } \
+  }
 
-extern struct transparent_image * transparent_get(EFI_HANDLE image);
-extern EFI_STATUS transparent_load_image(EFI_SYSTEM_TABLE *systab,
-					 EFI_HANDLE parent_image,
-					 EFI_DEVICE_PATH *path,
-					 VOID *buffer, UINTN size,
-					 EFI_HANDLE *image);
-extern EFI_STATUS transparent_start_image(struct transparent_image *trans,
-					  EFI_HANDLE image,
-					  UINTN *exit_data_size,
-					  CHAR16 **exit_data);
-extern EFI_STATUS transparent_unload_image(struct transparent_image *trans,
-					   EFI_HANDLE image);
+typedef struct _LOADER_PROTOCOL LOADER_PROTOCOL;
 
-#endif /* _TRANSPARENT_H */
+typedef
+EFI_STATUS
+(EFIAPI *LOADER_START_IMAGE)(
+  IN  LOADER_PROTOCOL		*This,
+  OUT UINTN			*ExitDataSize,
+  OUT CHAR16			**ExitData	OPTIONAL
+  );
+
+typedef EFI_STATUS
+(EFIAPI *LOADER_UNLOAD_IMAGE)(
+  IN  LOADER_PROTOCOL *This
+  );
+
+struct _LOADER_PROTOCOL {
+  LOADER_START_IMAGE		StartImage;
+  LOADER_UNLOAD_IMAGE		UnloadImage;
+};
+
+extern LOADER_PROTOCOL *loader_protocol(EFI_HANDLE image);
+extern EFI_STATUS loader_install(EFI_SYSTEM_TABLE *systab,
+				 EFI_HANDLE parent_image,
+				 EFI_DEVICE_PATH *path,
+				 VOID *buffer, UINTN size,
+				 EFI_HANDLE *handle);
+
+#endif /* _LOADER_H */

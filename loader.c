@@ -1,5 +1,5 @@
 /*
- * transparent - UEFI shim transparent LoadImage()/StartImage() support
+ * loader - UEFI shim transparent LoadImage()/StartImage() support
  *
  * Copyright (C) 2018 Michael Brown <mbrown@fensystems.co.uk>
  *
@@ -31,22 +31,22 @@
 
 #include "shim.h"
 #include <string.h>
-#include "transparent.h"
-
-static EFI_GUID loaded_image_guid = LOADED_IMAGE_PROTOCOL;
+#include "loader.h"
 
 static EFI_GUID loaded_image_path_guid = {
 	0xbc62157e, 0x3e33, 0x4fec,
 	{ 0x99, 0x20, 0x2d, 0x3b, 0x36, 0xd7, 0x50, 0xdf }
 };
 
-static EFI_GUID transparent_image_guid = {
-	0x915fc1fd, 0x8a37, 0x4a3d,
-	{ 0xa4, 0x2e, 0xd1, 0x10, 0xfc, 0x0d, 0x5a, 0xf0 }
-};
+static EFI_GUID loaded_image_guid = LOADED_IMAGE_PROTOCOL;
 
-struct transparent_image {
-	EFI_LOADED_IMAGE_PROTOCOL loaded;
+static EFI_GUID loader_guid = LOADER_PROTOCOL_GUID;
+
+struct image {
+	LOADER_PROTOCOL loader; /* Must be first */
+	EFI_LOADED_IMAGE_PROTOCOL li;
+
+	EFI_HANDLE handle;
 	EFI_PHYSICAL_ADDRESS memory;
 	UINTN pages;
 	entry_point_t entry;
@@ -61,31 +61,56 @@ static EFI_DEVICE_PATH * devpath_end(EFI_DEVICE_PATH *path) {
 	return path;
 }
 
-struct transparent_image * transparent_get(EFI_HANDLE image) {
+LOADER_PROTOCOL *loader_protocol(EFI_HANDLE image) {
 	void *interface;
 	EFI_STATUS rc;
 
-	rc = uefi_call_wrapper(BS->OpenProtocol, 6, image,
-			       &transparent_image_guid, &interface,
-			       image, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+	rc = uefi_call_wrapper(BS->OpenProtocol, 6, image, &loader_guid,
+			       &interface, image, NULL,
+			       EFI_OPEN_PROTOCOL_GET_PROTOCOL);
 	if (EFI_ERROR(rc))
 		return NULL;
 	return interface;
 }
 
-EFI_STATUS transparent_load_image(EFI_SYSTEM_TABLE *systab,
-				  EFI_HANDLE parent_image,
-				  EFI_DEVICE_PATH *path,
-				  VOID *buffer, UINTN size,
-				  EFI_HANDLE *image) {
+static EFI_STATUS EFIAPI loader_start_image(LOADER_PROTOCOL *This,
+				     UINTN *ExitDataSize,
+				     CHAR16 **ExitData) {
+	struct image *image = (struct image *)This;
+	EFI_STATUS rc;
+
+	/* Call entry point */
+	rc = uefi_call_wrapper(image->entry, 2, image->handle,
+			       image->li.SystemTable);
+	return rc;
+
+	return 0;
+}
+
+static EFI_STATUS EFIAPI loader_unload_image(LOADER_PROTOCOL *This) {
+	struct image *image = (struct image *)This;
+
+	uefi_call_wrapper(BS->UninstallMultipleProtocolInterfaces, 8,
+			  image->handle, &loader_guid, &image->loader,
+			  &loaded_image_path_guid, &image->li.FilePath,
+			  &loaded_image_guid, &image->li,
+			  NULL);
+	uefi_call_wrapper(BS->FreePages, 2, image->memory, image->pages);
+	FreePool(image);
+	return 0;
+}
+
+EFI_STATUS loader_install(EFI_SYSTEM_TABLE *systab, EFI_HANDLE parent_image,
+			  EFI_DEVICE_PATH *path, VOID *buffer, UINTN size,
+			  EFI_HANDLE *handle) {
+	struct image *image;
 	EFI_DEVICE_PATH *end;
-	struct transparent_image *trans;
 	UINTN path_len;
 	EFI_STATUS rc;
 
 	/* Sanity check */
 	if ((parent_image == NULL) || (path == NULL) || (buffer == NULL) ||
-	    (image == NULL)) {
+	    (handle == NULL)) {
 		rc = EFI_INVALID_PARAMETER;
 		goto err_invalid;
 	}
@@ -93,68 +118,46 @@ EFI_STATUS transparent_load_image(EFI_SYSTEM_TABLE *systab,
 	/* Allocate and initialise structure */
 	end = devpath_end(path);
 	path_len = (((void *)end - (void *)path) + sizeof(*end));
-	trans = AllocatePool(sizeof(*trans) + path_len);
-	if (!trans) {
+	image = AllocatePool(sizeof(*image) + path_len);
+	if (!image) {
 		rc = EFI_OUT_OF_RESOURCES;
 		goto err_alloc;
 	}
-	memset(trans, 0, sizeof(*trans));
-	trans->loaded.Revision = EFI_LOADED_IMAGE_PROTOCOL_REVISION;
-	trans->loaded.ParentHandle = parent_image;
-	trans->loaded.SystemTable = systab;
-	trans->loaded.FilePath = (void *)trans + sizeof(*trans);
-	memcpy(trans->loaded.FilePath, path, path_len);
+	memset(image, 0, sizeof(*image));
+	image->loader.StartImage = loader_start_image;
+	image->loader.UnloadImage = loader_unload_image;
+	image->li.Revision = EFI_LOADED_IMAGE_PROTOCOL_REVISION;
+	image->li.ParentHandle = parent_image;
+	image->li.SystemTable = systab;
+	image->li.FilePath = (void *)image + sizeof(*image);
+	memcpy(image->li.FilePath, path, path_len);
 
 	/* Verify and relocate image */
-	rc = handle_image(buffer, size, &trans->loaded, &trans->memory,
-			  &trans->pages, &trans->entry);
+	rc = handle_image(buffer, size, &image->li, &image->memory,
+			  &image->pages, &image->entry);
 	if (EFI_ERROR(rc))
 		goto err_handle_image;
 
 	/* Install protocols onto a new handle */
-	*image = NULL;
 	rc = uefi_call_wrapper(BS->InstallMultipleProtocolInterfaces, 8,
-			       image, &transparent_image_guid, trans,
-			       &loaded_image_path_guid, trans->loaded.FilePath,
-			       &loaded_image_guid, &trans->loaded,
+			       &image->handle, &loader_guid, &image->loader,
+			       &loaded_image_path_guid, image->li.FilePath,
+			       &loaded_image_guid, &image->li,
 			       NULL);
 	if (EFI_ERROR(rc))
 		goto err_install;
 
+	/* Return created handle */
+	*handle = image->handle;
+
 	return 0;
 
  err_install:
-	uefi_call_wrapper(BS->FreePages, 2, trans->memory, trans->pages);
+	uefi_call_wrapper(BS->FreePages, 2, image->memory, image->pages);
  err_handle_image:
-	FreePool(trans);
+	FreePool(image);
  err_alloc:
  err_invalid:
 	return rc;
 }
 
-EFI_STATUS transparent_start_image(struct transparent_image *trans,
-				   EFI_HANDLE image, UINTN *exit_data_size,
-				   CHAR16 **exit_data) {
-	EFI_STATUS rc;
-
-	//
-	Print(L"Calling entry point %x", trans->entry);
-
-	/* Call entry point */
-	rc = uefi_call_wrapper(trans->entry, 2, image,
-			       trans->loaded.SystemTable);
-	return rc;
-}
-
-EFI_STATUS transparent_unload_image(struct transparent_image *trans,
-				    EFI_HANDLE image) {
-
-	uefi_call_wrapper(BS->UninstallMultipleProtocolInterfaces, 8,
-			  image, &transparent_image_guid, trans,
-			  &loaded_image_path_guid, trans->loaded.FilePath,
-			  &loaded_image_guid, &trans->loaded,
-			  NULL);
-	uefi_call_wrapper(BS->FreePages, 2, trans->memory, trans->pages);
-	FreePool(trans);
-	return 0;
-}

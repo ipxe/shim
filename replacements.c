@@ -52,7 +52,7 @@
 #include <efilib.h>
 #include "shim.h"
 #include "replacements.h"
-#include "transparent.h"
+#include "loader.h"
 #include "console.h"
 #include "errors.h"
 
@@ -91,7 +91,7 @@ load_image(BOOLEAN BootPolicy, EFI_HANDLE ParentImageHandle,
 			SourceBuffer, SourceSize, ImageHandle);
 	hook_system_services(systab);
 	if (status == EFI_SECURITY_VIOLATION) {
-		status = transparent_load_image(systab,
+		status = loader_install(systab,
 			ParentImageHandle, DevicePath,
 			SourceBuffer, SourceSize, ImageHandle);
 	}
@@ -105,14 +105,13 @@ load_image(BOOLEAN BootPolicy, EFI_HANDLE ParentImageHandle,
 static EFI_STATUS EFIAPI
 start_image(EFI_HANDLE image_handle, UINTN *exit_data_size, CHAR16 **exit_data)
 {
+	LOADER_PROTOCOL *loader;
 	EFI_STATUS status;
-	struct transparent_image *trans;
 
-	trans = transparent_get(image_handle);
-	if (trans) {
+	loader = loader_protocol(image_handle);
+	if (loader) {
 		loader_is_participating = 1;
-		status = transparent_start_image(trans, image_handle,
-						 exit_data_size, exit_data);
+		status = loader->StartImage(loader, exit_data_size, exit_data);
 		loader_is_participating = 0;
 		return status;
 	}
@@ -147,11 +146,11 @@ start_image(EFI_HANDLE image_handle, UINTN *exit_data_size, CHAR16 **exit_data)
 static EFI_STATUS EFIAPI
 unload_image(EFI_HANDLE image_handle)
 {
-	struct transparent_image *trans;
+	LOADER_PROTOCOL *loader;
 
-	trans = transparent_get(image_handle);
-	if (trans)
-		return transparent_unload_image(trans, image_handle);
+	loader = loader_protocol(image_handle);
+	if (loader)
+		return loader->UnloadImage(loader);
 
 	return system_unload_image(image_handle);
 }
@@ -223,7 +222,7 @@ hook_system_services(EFI_SYSTEM_TABLE *local_systab)
 	system_start_image = systab->BootServices->StartImage;
 	systab->BootServices->StartImage = start_image;
 
-	/* we need UnloadImage() to handle transparent images */
+	/* we need UnloadImage() to handle LOADER_PROTOCOL */
 	system_unload_image = systab->BootServices->UnloadImage;
 	systab->BootServices->UnloadImage = unload_image;
 

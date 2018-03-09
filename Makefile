@@ -148,9 +148,9 @@ CFLAGS += -DENABLE_SHIM_CERT
 else
 TARGETS += $(MMNAME) $(FBNAME)
 endif
-OBJS	= shim.o netboot.o cert.o replacements.o tpm.o version.o errlog.o transparent.o
+OBJS	= shim.o netboot.o cert.o replacements.o tpm.o version.o errlog.o loader.o
 KEYS	= shim_cert.h ocsp.* ca.* shim.crt shim.csr shim.p12 shim.pem shim.key shim.cer
-ORIG_SOURCES	= shim.c shim.h netboot.c include/PeImage.h include/wincert.h include/console.h replacements.c replacements.h tpm.c tpm.h version.h errlog.c transparent.c transparent.h
+ORIG_SOURCES	= shim.c shim.h netboot.c include/PeImage.h include/wincert.h include/console.h replacements.c replacements.h tpm.c tpm.h version.h errlog.c loader.c loader.h
 MOK_OBJS = MokManager.o PasswordCrypt.o crypt_blowfish.o
 ORIG_MOK_SOURCES = MokManager.c shim.h include/console.h PasswordCrypt.c PasswordCrypt.h crypt_blowfish.c crypt_blowfish.h
 FALLBACK_OBJS = fallback.o tpm.o
