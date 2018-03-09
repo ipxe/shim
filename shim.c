@@ -1276,7 +1276,7 @@ static EFI_STATUS read_header(void *data, unsigned int datasize,
  */
 EFI_STATUS handle_image (void *data, unsigned int datasize,
 			 EFI_LOADED_IMAGE *li, EFI_PHYSICAL_ADDRESS *memory,
-			 UINTN *pages, entry_point_t *entry_point)
+			 UINTN *pages, EFI_IMAGE_ENTRY_POINT *entry_point)
 {
 	EFI_STATUS efi_status;
 	char *buffer;
@@ -1873,7 +1873,7 @@ EFI_STATUS start_image(EFI_HANDLE image_handle, CHAR16 *ImagePath)
 	EFI_LOADED_IMAGE *li, li_bak;
 	EFI_PHYSICAL_ADDRESS memory;
 	UINTN pages;
-	entry_point_t entry_point = NULL;
+	EFI_IMAGE_ENTRY_POINT entry_point = NULL;
 	CHAR16 *PathName = NULL;
 	void *sourcebuffer = NULL;
 	UINT64 sourcesize = 0;

@@ -51,7 +51,7 @@ struct image {
 	EFI_HANDLE handle;
 	EFI_PHYSICAL_ADDRESS memory;
 	UINTN pages;
-	entry_point_t entry;
+	EFI_IMAGE_ENTRY_POINT entry;
 
 	BOOLEAN running;
 	EFI_STATUS exit_status;
