@@ -55,9 +55,18 @@ typedef EFI_STATUS
   IN  LOADER_PROTOCOL *This
   );
 
+typedef EFI_STATUS
+(EFIAPI *LOADER_EXIT)(
+  IN  LOADER_PROTOCOL		*This,
+  IN  EFI_STATUS		ExitStatus,
+  OUT UINTN			ExitDataSize,
+  OUT CHAR16			*ExitData	OPTIONAL
+  );
+
 struct _LOADER_PROTOCOL {
   LOADER_START_IMAGE		StartImage;
   LOADER_UNLOAD_IMAGE		UnloadImage;
+  LOADER_EXIT			Exit;
 };
 
 extern LOADER_PROTOCOL *loader_protocol(EFI_HANDLE image);

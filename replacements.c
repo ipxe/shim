@@ -178,7 +178,14 @@ static EFI_STATUS EFIAPI
 do_exit(EFI_HANDLE ImageHandle, EFI_STATUS ExitStatus,
 	UINTN ExitDataSize, CHAR16 *ExitData)
 {
+	LOADER_PROTOCOL *loader;
 	EFI_STATUS status;
+
+	loader = loader_protocol(ImageHandle);
+	if (loader) {
+		return loader->Exit(ImageHandle, ExitStatus, ExitDataSize,
+				    ExitData);
+	}
 
 	shim_fini();
 

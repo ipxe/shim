@@ -31,6 +31,8 @@
 
 #include "shim.h"
 #include <string.h>
+#include <efi.h>
+#include <efisetjmp.h>
 #include "loader.h"
 
 static EFI_GUID loaded_image_path_guid = {
@@ -50,6 +52,13 @@ struct image {
 	EFI_PHYSICAL_ADDRESS memory;
 	UINTN pages;
 	entry_point_t entry;
+
+	BOOLEAN running;
+	EFI_STATUS exit_status;
+	UINTN exit_data_size;
+	CHAR16 *exit_data;
+
+	jmp_buf jmp_buf;
 };
 
 static EFI_DEVICE_PATH * devpath_end(EFI_DEVICE_PATH *path) {
@@ -74,21 +83,34 @@ LOADER_PROTOCOL *loader_protocol(EFI_HANDLE image) {
 }
 
 static EFI_STATUS EFIAPI loader_start_image(LOADER_PROTOCOL *This,
-				     UINTN *ExitDataSize,
-				     CHAR16 **ExitData) {
-	struct image *image = (struct image *)This;
+					    UINTN *ExitDataSize,
+					    CHAR16 **ExitData) {
+	struct image *image = (struct image *) This;
 	EFI_STATUS rc;
 
-	/* Call entry point */
-	rc = uefi_call_wrapper(image->entry, 2, image->handle,
-			       image->li.SystemTable);
-	return rc;
+	if (image->running)
+		return EFI_ALREADY_STARTED;
 
-	return 0;
+	image->running = TRUE;
+	image->exit_data_size = 0;
+	image->exit_data = NULL;
+	if (setjmp(&image->jmp_buf) == 0 ) {
+		rc = uefi_call_wrapper(image->entry, 2, image->handle,
+				       image->li.SystemTable);
+	} else {
+		rc = image->exit_status;
+	}
+	image->running = FALSE;
+	if (ExitDataSize)
+		*ExitDataSize = image->exit_data_size;
+	if (ExitData)
+		*ExitData = image->exit_data;
+
+	return rc;
 }
 
 static EFI_STATUS EFIAPI loader_unload_image(LOADER_PROTOCOL *This) {
-	struct image *image = (struct image *)This;
+	struct image *image = (struct image *) This;
 
 	uefi_call_wrapper(BS->UninstallMultipleProtocolInterfaces, 8,
 			  image->handle, &loader_guid, &image->loader,
@@ -100,6 +122,19 @@ static EFI_STATUS EFIAPI loader_unload_image(LOADER_PROTOCOL *This) {
 	return 0;
 }
 
+static EFI_STATUS EFIAPI loader_exit(LOADER_PROTOCOL *This,
+				     EFI_STATUS ExitStatus, UINTN ExitDataSize,
+				     CHAR16 *ExitData) {
+	struct image *image = (struct image *) This;
+
+	if (!image->running)
+		return EFI_NOT_STARTED;
+	image->exit_status = ExitStatus;
+	image->exit_data_size = ExitDataSize;
+	image->exit_data = ExitData;
+	longjmp(&image->jmp_buf, 1);
+}
+
 EFI_STATUS loader_install(EFI_SYSTEM_TABLE *systab, EFI_HANDLE parent_image,
 			  EFI_DEVICE_PATH *path, VOID *buffer, UINTN size,
 			  EFI_HANDLE *handle) {
@@ -108,14 +143,12 @@ EFI_STATUS loader_install(EFI_SYSTEM_TABLE *systab, EFI_HANDLE parent_image,
 	UINTN path_len;
 	EFI_STATUS rc;
 
-	/* Sanity check */
 	if ((parent_image == NULL) || (path == NULL) || (buffer == NULL) ||
 	    (handle == NULL)) {
 		rc = EFI_INVALID_PARAMETER;
 		goto err_invalid;
 	}
 
-	/* Allocate and initialise structure */
 	end = devpath_end(path);
 	path_len = (((void *)end - (void *)path) + sizeof(*end));
 	image = AllocatePool(sizeof(*image) + path_len);
@@ -126,19 +159,18 @@ EFI_STATUS loader_install(EFI_SYSTEM_TABLE *systab, EFI_HANDLE parent_image,
 	memset(image, 0, sizeof(*image));
 	image->loader.StartImage = loader_start_image;
 	image->loader.UnloadImage = loader_unload_image;
+	image->loader.Exit = loader_exit;
 	image->li.Revision = EFI_LOADED_IMAGE_PROTOCOL_REVISION;
 	image->li.ParentHandle = parent_image;
 	image->li.SystemTable = systab;
 	image->li.FilePath = (void *)image + sizeof(*image);
 	memcpy(image->li.FilePath, path, path_len);
 
-	/* Verify and relocate image */
 	rc = handle_image(buffer, size, &image->li, &image->memory,
 			  &image->pages, &image->entry);
 	if (EFI_ERROR(rc))
 		goto err_handle_image;
 
-	/* Install protocols onto a new handle */
 	rc = uefi_call_wrapper(BS->InstallMultipleProtocolInterfaces, 8,
 			       &image->handle, &loader_guid, &image->loader,
 			       &loaded_image_path_guid, image->li.FilePath,
@@ -147,9 +179,7 @@ EFI_STATUS loader_install(EFI_SYSTEM_TABLE *systab, EFI_HANDLE parent_image,
 	if (EFI_ERROR(rc))
 		goto err_install;
 
-	/* Return created handle */
 	*handle = image->handle;
-
 	return 0;
 
  err_install:
