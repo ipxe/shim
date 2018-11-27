@@ -420,6 +420,12 @@ static void show_ca_warning()
 	text[7] = L"Please contact the issuer to update the certificate.   ";
 	text[8] = NULL;
 
+	//
+	// Do not display warning, since this prevents all production
+	// Fedora kernels from booting without a manual keypress.
+	//
+	return;
+
 	console_reset();
 	console_print_box(text, -1);
 }
