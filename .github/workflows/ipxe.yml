@@ -1,0 +1,76 @@
+name: iPXE
+
+on:
+  push:
+    branches:
+      - ipxe
+    tags:
+      - ipxe-*
+
+jobs:
+
+  build:
+    name: Build
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Check out code
+        uses: actions/checkout@v2
+        with:
+          submodules: true
+
+      - name: Install packages
+        run: |
+          sudo apt update
+          sudo apt install -y -o Acquire::Retries=50 \
+                   gcc-aarch64-linux-gnu gcab
+
+      - name: Build (x64)
+        run: |
+          mkdir build-x64
+          make -C build-x64 -f ../Makefile TOPDIR=..
+
+      - name: Build (aa64)
+        run: |
+          mkdir build-aa64
+          make -C build-aa64 -f ../Makefile TOPDIR=.. \
+               CROSS_COMPILE=aarch64-linux-gnu-
+
+      - name: Generate .cab
+        run: |
+          gcab -n -c unsigned.cab \
+               build-x64/shimx64.efi build-aa64/shimaa64.efi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: unsigned.cab
+          path: unsigned.cab
+
+      - name: Get release version
+        if: startsWith(github.event.ref, 'refs/tags/ipxe-')
+        run: |
+          echo RELVER=${GITHUB_REF/refs\/tags\/ipxe-/} >> ${GITHUB_ENV}
+          echo RELDATE=$(git show -s --format='%as') >> ${GITHUB_ENV}
+
+      - name: Create release
+        if: startsWith(github.event.ref, 'refs/tags/ipxe-')
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: "${{ env.RELVER }} (${{ env.RELDATE }})"
+          prerelease: true
+
+      - name: Upload .cab
+        if: startsWith(github.event.ref, 'refs/tags/ipxe-')
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: unsigned.cab
+          asset_name: unsigned.cab
+          asset_content_type: application/vnd.ms-cab-compressed
