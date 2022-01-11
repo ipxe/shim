@@ -23,7 +23,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y -o Acquire::Retries=50 \
-                   gcc-aarch64-linux-gnu gcab
+                   gcc-aarch64-linux-gnu gcab dos2unix
 
       - name: Build (x64)
         run: |
