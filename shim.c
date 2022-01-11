@@ -789,6 +789,55 @@ error:
 }
 
 /*
+ * Construct the next path given the current path (which may not be
+ * NUL-terminated)
+ */
+CHAR8 *next_path(CONST CHAR8 *path, UINTN path_len)
+{
+	CHAR8 default_loader[sizeof DEFAULT_LOADER_CHAR];
+	CHAR8 *filename;
+	CHAR8 *hyphen;
+	CHAR8 *dot;
+	CHAR8 *loader;
+	CHAR8 *next;
+
+	/* Allocate a string guaranteed to be long enough */
+	translate_slashes(default_loader, DEFAULT_LOADER_CHAR);
+	next = AllocateZeroPool(path_len + strlen(default_loader) + 1);
+	if (!next)
+		return NULL;
+
+	/* Copy original path */
+	memcpy(next, path, path_len);
+	next[path_len] = '\0';
+
+	/* Locate filename */
+	filename = strrchr(next, '/');
+	if (!filename)
+		filename = next;
+	if (*filename == '/')
+		filename++;
+
+	/* Check for "-shimXXXX.efi" suffix */
+	if ((hyphen = strrchr(filename, '-')) &&
+	    (strncasecmp(hyphen, "-shim", 5) == 0) &&
+	    (dot = strrchr(hyphen, '.')) &&
+	    (strcasecmp(dot, ".efi") == 0) &&
+	    (dot - hyphen <= 9)) {
+		/* Suffix is present: replace "-shimXXXX" with ".efi" */
+		strcpy(hyphen, dot);
+	} else {
+		/* Suffix is absent: use default loader name */
+		loader = default_loader;
+		if (*loader == '/')
+			loader++;
+		strcpy(filename, loader);
+	}
+
+	return next;
+}
+
+/*
  * Generate the path of an executable given shim's path and the name
  * of the executable
  */
