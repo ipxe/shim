@@ -29,17 +29,18 @@ jobs:
         run: |
           mkdir build-x64
           make -C build-x64 -f ../Makefile TOPDIR=..
+          cp build-x64/shimx64.efi ipxe-shimx64.efi
 
       - name: Build (aa64)
         run: |
           mkdir build-aa64
           make -C build-aa64 -f ../Makefile TOPDIR=.. \
                CROSS_COMPILE=aarch64-linux-gnu-
+          cp build-aa64/shimaa64.efi ipxe-shimaa64.efi
 
       - name: Generate .cab
         run: |
-          gcab -n -c unsigned.cab \
-               build-x64/shimx64.efi build-aa64/shimaa64.efi
+          gcab -c unsigned.cab ipxe-shimx64.efi ipxe-shimaa64.efi
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v2
