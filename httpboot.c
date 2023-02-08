@@ -148,45 +148,6 @@ out:
 }
 
 static EFI_STATUS
-generate_next_uri (CONST CHAR8 *current_uri, CONST CHAR8 *next_loader,
-		   CHAR8 **uri)
-{
-	CONST CHAR8 *ptr;
-	UINTN next_len;
-	UINTN path_len = 0;
-	UINTN count = 0;
-
-	if (strncmp(current_uri, (CHAR8 *)"http://", 7) == 0) {
-		ptr = current_uri + 7;
-		count += 7;
-	} else if (strncmp(current_uri, (CHAR8 *)"https://", 8) == 0) {
-		ptr = current_uri + 8;
-		count += 8;
-	} else {
-		return EFI_INVALID_PARAMETER;
-	}
-
-	/* Extract the path */
-	next_len = strlen(next_loader);
-	while (*ptr != '\0') {
-		count++;
-		if (*ptr == '/')
-			path_len = count;
-		ptr++;
-	}
-
-	*uri = AllocatePool(sizeof(CHAR8) * (path_len + next_len + 1));
-	if (!*uri)
-		return EFI_OUT_OF_RESOURCES;
-
-	CopyMem(*uri, (void *)current_uri, path_len);
-	CopyMem(*uri + path_len, (void *)next_loader, next_len);
-	(*uri)[path_len + next_len] = '\0';
-
-	return EFI_SUCCESS;
-}
-
-static EFI_STATUS
 extract_hostname (CONST CHAR8 *url, CHAR8 **hostname)
 {
 	CONST CHAR8 *ptr, *start;
@@ -717,19 +678,16 @@ httpboot_fetch_buffer (EFI_HANDLE image, VOID **buffer, UINT64 *buf_size)
 {
 	EFI_STATUS efi_status;
 	EFI_HANDLE nic;
-	CHAR8 next_loader[sizeof DEFAULT_LOADER_CHAR];
 	CHAR8 *next_uri = NULL;
 	CHAR8 *hostname = NULL;
 
 	if (!uri)
 		return EFI_NOT_READY;
 
-	translate_slashes(next_loader, DEFAULT_LOADER_CHAR);
-
 	/* Create the URI for the next loader based on the original URI */
-	efi_status = generate_next_uri(uri, next_loader, &next_uri);
-	if (EFI_ERROR(efi_status)) {
-		perror(L"Next URI: %a, %r\n", next_uri, efi_status);
+	next_uri = next_path(uri, strlen(uri));
+	if (!next_uri) {
+		efi_status = EFI_OUT_OF_RESOURCES;
 		goto error;
 	}
 
