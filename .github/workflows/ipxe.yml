@@ -1,0 +1,99 @@
+name: iPXE
+
+on:
+  push:
+    branches:
+      - ipxe*
+    tags:
+      - ipxe*
+
+env:
+  SHIMURL: ${{ github.server_url }}/rhboot/shim
+  IPXEURL: ${{ github.server_url }}/${{ github.repository }}
+
+jobs:
+
+  build:
+    name: Build
+    runs-on: ubuntu-24.04
+    steps:
+
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: true
+
+      - name: Identify upstream tag
+        run: |
+          BASECOMMIT=$(git merge-base origin/main HEAD)
+          SHIMTAG=$(git describe ${BASECOMMIT})
+          if [ ! $(git tag -l "${SHIMTAG}") ] ; then
+              echo "Not branched from an upstream tag"
+              exit 1
+          fi
+          echo SHIMTAG=${SHIMTAG} >> ${GITHUB_ENV}
+
+      - name: Install packages
+        run: |
+          sudo apt update
+          sudo apt install -y -o Acquire::Retries=50 \
+                   gcc-aarch64-linux-gnu gcab dos2unix
+
+      - name: Build (x64)
+        run: |
+          mkdir build-x64
+          make -C build-x64 -f ../Makefile TOPDIR=..
+          cp build-x64/shimx64.efi ipxe-shimx64.efi
+
+      - name: Build (aa64)
+        run: |
+          mkdir build-aa64
+          make -C build-aa64 -f ../Makefile TOPDIR=.. \
+               CROSS_COMPILE=aarch64-linux-gnu-
+          cp build-aa64/shimaa64.efi ipxe-shimaa64.efi
+
+      - name: Generate .cab
+        run: |
+          gcab -c unsigned.cab ipxe-shimx64.efi ipxe-shimaa64.efi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned.cab
+          path: unsigned.cab
+          if-no-files-found: error
+
+      - name: Get release version
+        if: startsWith(github.event.ref, 'refs/tags/ipxe-')
+        run: |
+          IPXETAG=${GITHUB_REF/refs\/tags\//}
+          IPXEVER=${IPXETAG/ipxe-/}
+          IPXEDATE=$(git show -s --format='%as')
+          echo IPXETAG=${IPXETAG} >> ${GITHUB_ENV}
+          echo IPXEVER=${IPXEVER} >> ${GITHUB_ENV}
+          echo IPXEDATE=${IPXEDATE} >> ${GITHUB_ENV}
+
+      - name: Generate changelog
+        run: |
+          echo -e "Based on upstream" \
+              "[shim-${SHIMTAG}](${SHIMURL}/releases/tag/${SHIMTAG})\n" \
+              > IPXECHANGES.md
+          echo -e "## Included changes\n" >> IPXECHANGES.md
+          git log origin/main..HEAD \
+              --format="format:* [%s](${IPXEURL}/commit/%h)" >> IPXECHANGES.md
+          DOWNLOADURL=${IPXEURL}/releases/download/${IPXETAG}
+          echo -e "\n\n## Downloads\n" >> IPXECHANGES.md
+          echo "* [ipxe-shimx64.efi](${DOWNLOADURL}/ipxe-shimx64.efi)" \
+              "(x86_64)" >> IPXECHANGES.md
+          echo "* [ipxe-shimaa64.efi](${DOWNLOADURL}/ipxe-shimaa64.efi)" \
+              "(aarch64)" >> IPXECHANGES.md
+
+      - name: Create release
+        if: startsWith(github.event.ref, 'refs/tags/ipxe-')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${IPXETAG} --verify-tag --prerelease \
+              --title "${IPXEVER} (${IPXEDATE})" --notes-file IPXECHANGES.md \
+              ipxe-shimx64.efi ipxe-shimaa64.efi unsigned.cab
