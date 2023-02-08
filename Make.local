@@ -1,0 +1,1 @@
+VENDOR_CERT_FILE = $(TOPDIR)/ipxe.crt
