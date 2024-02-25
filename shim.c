@@ -1279,6 +1279,57 @@ EFI_STATUS init_grub(EFI_HANDLE image_handle)
 }
 
 /*
+ * Derive second stage loader name automatically from image name, if possible
+ *
+ * If our own image name is of the form "shim-foo.efi" or
+ * "shim<arch>-foo.efi", then use "foo.efi" as the default second
+ * stage loader name.
+ */
+static void set_auto_second_stage (EFI_LOADED_IMAGE *li) {
+	static CHAR16 *prefix = L"shim-";
+	static CHAR16 *archprefix = L"shim" EFI_ARCH L"-";
+	EFI_DEVICE_PATH *path;
+	FILEPATH_DEVICE_PATH *fp;
+	CHAR16 *filename;
+	CHAR16 *chr;
+	size_t len;
+
+	/* Scan through device path nodes */
+	for (path = li->FilePath; !IsDevicePathEnd(path);
+	     path = NextDevicePathNode(path)) {
+
+		/* Search for a file path device path node */
+		if (DevicePathType(path) != MEDIA_DEVICE_PATH)
+			continue;
+		if (DevicePathSubType(path) != MEDIA_FILEPATH_DP)
+			continue;
+		fp = (FILEPATH_DEVICE_PATH *)path;
+
+		/* Check for correct string termination */
+		len = DevicePathNodeLength(path);
+		if (len < sizeof(*fp))
+			continue;
+		if (fp->PathName[((len - sizeof(*path)) / sizeof(CHAR16)) - 1])
+			continue;
+
+		/* Find filename */
+		filename = fp->PathName;
+		for (chr = filename; *chr; chr++) {
+			if ((*chr == L'/') || (*chr == L'\\'))
+				filename = (chr + 1);
+		}
+
+		/* Check for a "shim-foo.efi" filename */
+		if (StrnCaseCmp(filename, prefix, StrLen(prefix)) == 0)
+			second_stage = (filename + StrLen(prefix));
+
+		/* Check for a "shim<arch>-foo.efi" filename */
+		if (StrnCaseCmp(filename, archprefix, StrLen(archprefix)) == 0)
+			second_stage = (filename + StrLen(archprefix));
+	}
+}
+
+/*
  * Check the load options to specify the second stage loader
  */
 EFI_STATUS set_second_stage (EFI_HANDLE image_handle)
@@ -1296,6 +1347,8 @@ EFI_STATUS set_second_stage (EFI_HANDLE image_handle)
 		perror (L"Failed to get load options: %r\n", efi_status);
 		return efi_status;
 	}
+
+	set_auto_second_stage(li);
 
 #if defined(DISABLE_REMOVABLE_LOAD_OPTIONS)
 	/*
