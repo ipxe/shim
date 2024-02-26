@@ -335,4 +335,7 @@ typedef struct {
 	EFI_DEVICE_PATH		*loaded_image_device_path;
 } SHIM_LOADED_IMAGE;
 
+extern CHAR8 *automatic_next_path(CONST CHAR8 *path, UINTN path_len,
+				  CONST CHAR8 *maybe_loader);
+
 #endif /* SHIM_H_ */

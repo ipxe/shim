@@ -220,6 +220,9 @@ generate_next_uri (CONST CHAR8 *current_uri, CONST CHAR8 *next_loader,
 		ptr++;
 	}
 
+	if((*uri = automatic_next_path(current_uri, 0, next_loader)))
+		return EFI_SUCCESS;
+
 	*uri = AllocatePool(sizeof(CHAR8) * (path_len + next_len + 1));
 	if (!*uri)
 		return EFI_OUT_OF_RESOURCES;

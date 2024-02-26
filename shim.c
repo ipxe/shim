@@ -1307,3 +1307,59 @@ die:
 	devel_egress(EFI_ERROR(efi_status) ? EXIT_FAILURE : EXIT_SUCCESS);
 	return efi_status;
 }
+
+/*
+ * If we are attempting to download the default loader, then construct
+ * the path by changing "-shim[arch].efi" to ".efi", if possible.
+ *
+ * This code is maintained as a patch separate from the shim codebase,
+ * and so is deliberately optimised for minimal intrusiveness rather
+ * than elegance.
+ *
+ */
+CHAR8 *automatic_next_path(CONST CHAR8 *path, UINTN path_len,
+			   CONST CHAR8 *maybe_loader)
+{
+	CHAR8 *filename;
+	CHAR8 *hyphen;
+	CHAR8 *dot;
+	CHAR8 *next;
+
+	/* Check if this request is for the default loader */
+	if (strcmp(maybe_loader, DEFAULT_LOADER_CHAR) != 0) {
+		/* Not the default loader: use normal shim code path */
+		return NULL;
+	}
+
+	/* Copy and NUL-terminate the path */
+	if (!path_len)
+		path_len = strlen(path);
+	next = AllocateZeroPool(path_len + 1);
+	if (!next)
+		return NULL;
+	memcpy(next, path, path_len);
+	next[path_len] = '\0';
+
+	/* Locate filename portion of path */
+	filename = strrchr(next, '/');
+	if (filename) {
+		filename++;
+	} else {
+		filename = next;
+	}
+
+	/* Check for "-shim[arch].efi" suffix */
+	if ((hyphen = strrchr(filename, '-')) &&
+	    (strncasecmp(hyphen, "-shim", 5) == 0) &&
+	    (dot = strrchr(hyphen, '.')) &&
+	    (strcasecmp(dot, ".efi") == 0) &&
+	    (dot - hyphen <= 9)) {
+		/* Suffix is present: replace "-shim[arch]" with ".efi" */
+		strcpy(hyphen, dot);
+		return next;
+	}
+
+	/* Suffix not found: use normal shim code path */
+	FreePool(next);
+	return NULL;
+}
