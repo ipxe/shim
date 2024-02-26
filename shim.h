@@ -324,4 +324,7 @@ verify_buffer (char *data, int datasize,
 
 char *translate_slashes(char *out, const char *str);
 
+extern CHAR8 *automatic_next_path(CONST CHAR8 *path, UINTN path_len,
+				  CONST CHAR8 *maybe_loader);
+
 #endif /* SHIM_H_ */

@@ -210,6 +210,10 @@ static BOOLEAN extract_tftp_info(CHAR8 *url, CHAR8 *name)
 		FreePool(template);
 		return FALSE;
 	}
+	if ((full_path = automatic_next_path(end, 0, name))) {
+		FreePool(template);
+		return TRUE;
+	}
 	full_path = AllocateZeroPool(strlen(end)+strlen(template)+1);
 	if (!full_path) {
 		FreePool(template);
@@ -275,6 +279,12 @@ static EFI_STATUS parseDhcp4(CHAR8 *name)
 	INTN dir_len = strnlen((CHAR8 *)pkt_v4->BootpBootFile, 127);
 	INTN i;
 	UINT8 *dir = pkt_v4->BootpBootFile;
+
+	if ((full_path = automatic_next_path((CHAR8 *)dir, dir_len, name))) {
+		memcpy(&tftp_addr.v4, pkt_v4->BootpSiAddr, 4);
+		FreePool(template);
+		return EFI_SUCCESS;
+	}
 
 	for (i = dir_len; i >= 0; i--) {
 		if ((dir[i] == '/') || (dir[i] == '\\'))
