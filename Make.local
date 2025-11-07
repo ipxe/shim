@@ -1,2 +1,2 @@
-VENDOR_CERT_FILE = $(TOPDIR)/ipxe.der
+VENDOR_CERT_FILE = $(TOPDIR)/ipxe-sb-ca.der
 DEFAULT_LOADER = ipxe.efi
